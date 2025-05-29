@@ -1,19 +1,27 @@
+# =========================
+# 📦 Imports
+# =========================
 import os
-import hashlib
+import re
 import json
-from flask import Flask, request, render_template
+import hashlib
+import asyncio
+import aiohttp
+import requests
+from flask import Flask, request, render_template, redirect, session
+from werkzeug.utils import secure_filename
 from PyPDF2 import PdfReader
 from dotenv import load_dotenv
-import requests
-import re
-import aiohttp
-import asyncio
+from apscheduler.schedulers.background import BackgroundScheduler
 
-
-# ==== Load environment variables ====
+# =========================
+# 🌱 Environment Setup
+# =========================
 load_dotenv()
 
-# ======= CONFIGURATION =======
+# =========================
+# ⚙️ Configuration
+# =========================
 API_KEY = os.getenv("GEMINI_API_KEY")
 MODEL = "gemini-2.0-flash"
 CHUNK_SIZE = 3000
@@ -21,17 +29,27 @@ UPLOAD_FOLDER = "uploads"
 CACHE_FILE = "flashcard_cache.json"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Flask setup
+# =========================
+# 🔧 Flask App Setup
+# =========================
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "0b8a96ee70c586cf0a38b9e325fc55adfd9854c9")  # Add secret key for sessions
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
-# ====== Load or initialize flashcard cache ======
+# =========================
+# 💾 Load Flashcard Cache
+# =========================
 if os.path.exists(CACHE_FILE):
     with open(CACHE_FILE, "r", encoding="utf-8") as f:
         flashcard_cache = json.load(f)
 else:
     flashcard_cache = {}
 
+semaphore = asyncio.Semaphore(3)
+
+# =========================
+# 🧩 Utility Functions
+# =========================
 def chunk_hash(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -51,60 +69,25 @@ def extract_text_chunks(filepath, max_chars=CHUNK_SIZE):
     return [full_text[i:i + max_chars] for i in range(0, len(full_text), max_chars)]
 
 def extract_dict_from_markdown(markdown_string):
-    # Step 1: Extract raw JSON string from the markdown
     match = re.search(r'```json\n(.*?)\n```', markdown_string, re.DOTALL)
     if not match:
         return None
-    
     raw_json = match.group(1).strip()
-    
-    # Step 2: Convert JSON string to Python object (list of dicts)
     return json.loads(raw_json)
 
-# def summarize_chunk_with_cache(chunk):
-#     key = chunk_hash(chunk)
-#     if key in flashcard_cache:
-#         print("✅ Cache hit")
-#         return flashcard_cache[key]
+def sanitize(obj):
+    if isinstance(obj, dict):
+        return {k: sanitize(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize(i) for i in obj]
+    elif obj is None:
+        return ""
+    else:
+        return obj
 
-#     print("⏳ Cache miss – calling Gemini API...")
-#     url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={API_KEY}"
-
-#     prompt = prompt = (
-#         "Read the following content and return only a list of flashcard-style questions and answers. "
-#         "Do not include any introductions, explanations, or conclusions. "
-#         "Strictly output only the Q&A flashcards. In a json format of the form [{'1': {'q': 'response', 'a': 'response'}}]\n\n"
-#         ""
-#         f"{chunk}"
-#     )
-
-
-#     payload = {
-#         "contents": [
-#             {
-#                 "parts": [{"text": prompt}]
-#             }
-#         ]
-#     }
-
-#     headers = {
-#         "Content-Type": "application/json"
-#     }
-
-#     response = requests.post(url, headers=headers, json=payload)
-#     if response.ok:
-#         summary = response.json()["candidates"][0]["content"]["parts"][0]["text"]
-#         summary = extract_dict_from_markdown(summary)
-#         flashcard_cache[key] = summary
-#         with open(CACHE_FILE, "w", encoding="utf-8") as f:
-#             json.dump(flashcard_cache, f, indent=2)
-#         return summary
-#     else:
-#         print("❌ Error:", response.status_code, response.text)
-#         return "[Error summarizing]"
-
-semaphore = asyncio.Semaphore(3)
-
+# =========================
+# 🤖 Gemini API Calls
+# =========================
 async def summarize_chunk_with_cache(session, chunk):
     async with semaphore:
         key = chunk_hash(chunk)
@@ -114,18 +97,15 @@ async def summarize_chunk_with_cache(session, chunk):
 
         print("⏳ Cache miss – calling Gemini API...")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={API_KEY}"
-
         prompt = (
             "Read the following content and return only a list of flashcard-style questions and answers. "
             "Do not include any introductions, explanations, or conclusions. "
             "Strictly output only the Q&A flashcards. In a json format of the form [{'1': {'q': 'response', 'a': 'response'}}]\n\n"
             f"{chunk}"
         )
-
         payload = {
             "contents": [{"parts": [{"text": prompt}]}]
         }
-
         headers = {"Content-Type": "application/json"}
 
         try:
@@ -150,37 +130,77 @@ async def summarize_all_chunks(chunks):
         tasks = [summarize_chunk_with_cache(session, chunk) for chunk in chunks]
         return await asyncio.gather(*tasks)
 
-def sanitize(obj):
-    if isinstance(obj, dict):
-        return {k: sanitize(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [sanitize(i) for i in obj]
-    elif obj is None:
-        return ""
-    else:
-        return obj
 
-@app.route("/", methods=["GET", "POST"])
-def index():
-    flashcards = []
-    # if request.method == "POST":
-    #     file = request.files.get("pdf")
-    #     if file and file.filename.endswith(".pdf"):
-    #         filepath = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
-    #         file.save(filepath)
+def clear_upload_folder():
+    for filename in os.listdir(UPLOAD_FOLDER):
+        file_path = os.path.join(UPLOAD_FOLDER, filename)
+        try:
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+                print(f"Deleted file: {file_path}")
+        except Exception as e:
+            print(f"Error deleting {file_path}: {e}")
 
-    chunks = extract_text_chunks("ground.pdf")
-    flashcards = asyncio.run(summarize_all_chunks(chunks))
-    flashcards = sanitize(flashcards)
-    
-    questions_count = len(flashcards)
-    
+def clear_cache_file():
+    try:
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump({}, f)
+        print(f"Cleared cache file: {CACHE_FILE}")
+    except Exception as e:
+        print(f"Error clearing cache file: {e}")
 
-    # return render_template("index.html", flashcards=flashcards)
-    
-    print(flashcards)
+def cleanup_task():
+    print("Running cleanup task...")
+    clear_upload_folder()
+    clear_cache_file()
+    print("Cleanup task done.")
+
+
+scheduler = BackgroundScheduler()
+scheduler.add_job(func=cleanup_task, trigger="interval", minutes=30)
+scheduler.start()
+
+# Shut down scheduler when exiting app
+import atexit
+atexit.register(lambda: scheduler.shutdown())
+
+# =========================
+# 🌐 Flask Routes
+# =========================
+@app.route("/", methods=["GET"])
+def home():
+    return render_template("upload.html")
+
+@app.route("/upload", methods=["POST"])
+def upload():
+    file = request.files.get("pdf")
+    if file and file.filename.endswith(".pdf"):
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+        file.save(filepath)
+
+        session["pdf_path"] = filepath
+        return redirect("/loading")
+    return "Invalid file", 400
+
+@app.route("/loading", methods=["GET"])
+def loading():
+    return render_template("loading.html")
+
+@app.route("/flashcards", methods=["GET", "POST"])
+async def flashcards_view():
+    filepath = session.get("pdf_path")
+    if not filepath:
+        return redirect("/")
+
+    chunks = extract_text_chunks(filepath)
+    flashcards = await summarize_all_chunks(chunks)
+    questions_count = len(flashcards)    
 
     return render_template("index.html", flashcards=flashcards, questions_count=questions_count)
 
+# =========================
+# 🚀 Run Server
+# =========================
 if __name__ == "__main__":
     app.run(debug=True)

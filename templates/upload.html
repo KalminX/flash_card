@@ -1,17 +1,10 @@
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Kalmin Anki</title>
+<body class="light">
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
             font-family: Arial, sans-serif;
-            word-break: break-all;
         }
 
         body {
@@ -94,6 +87,8 @@
 
         .content {
             text-align: center;
+            margin-top: 10em;
+
         }
 
         .word {
@@ -132,7 +127,6 @@
             position: absolute;
             bottom: 15px;
             gap: 20px;
-            width: calc(100% - 40px);
         }
 
         button {
@@ -143,9 +137,7 @@
             color: #0d172a;
             cursor: pointer;
             display: inline-block;
-            font-family: "Basier circle", -apple-system, system-ui, "Segoe UI", Roboto,
-                "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji",
-                "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+            font-family: "Basier circle", -apple-system, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
             font-size: 1.1rem;
             font-weight: 600;
             line-height: 1;
@@ -153,12 +145,11 @@
             text-align: center;
             text-decoration: none #0d172a solid;
             text-decoration-thickness: auto;
-            transition: all 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: all .1s cubic-bezier(.4, 0, .2, 1);
             box-shadow: 0px 1px 2px rgba(166, 175, 195, 0.25);
             user-select: none;
             -webkit-user-select: none;
             touch-action: manipulation;
-            width: 50%;
         }
 
         button.dark {
@@ -182,65 +173,57 @@
                 padding: 1rem 2rem;
             }
         }
-    </style>
-</head>
 
-<body class="light">
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        input[type="file"] {
+            padding: 0.5rem;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            background: #fafafa;
+            cursor: pointer;
+            transition: border 0.3s;
+        }
+
+        body.dark input[type="file"] {
+            background: #3d3d3d;
+            border-color: #555;
+        }
+
+        input[type="file"]:hover {
+            border-color: #888;
+        }
+    </style>
     <div class="container">
         <div class="header">
             <span class="menu-icon theme-toggle" onclick="toggleTheme()">🌞</span>
-            <span class="notification" id="notification"></span>
+            <span class="notification">📤 Upload</span>
         </div>
         <div class="nav-bar">
-            <span>🌞</span>
-            <span class="active">📖</span>
-            <span>🔍</span>
-            <span>🎌</span>
-            <span>🏙️</span>
+            <span class="active">📤</span>
+            <span>📖</span>
+            <span>⏳</span>
         </div>
-
         <div class="content">
-            <div class="word" id="word"></div>
-            <div class="reading" id="reading"></div>
-            <div class="pos" id="pos"></div>
-            <div class="definition" id="definition"></div>
-            <div class="example" id="example"></div>
-        </div>
-
-        <div class="buttons">
-            <button id="previous-btn">Previous</button>
-            <button id="next-btn">Next</button>
+            <form id="upload-form" enctype="multipart/form-data" method="POST" action="/upload">
+                <input type="file" name="pdf" accept=".pdf" required>
+                <button type="submit">
+                    <h2>📄 Upload PDF</h2>
+                </button>
+            </form>
         </div>
     </div>
 
     <script>
-        // Assuming flashcardData is provided from server-side templating
-        const flashcardData = {{ flashcards | tojson }};
-
-        // Flatten all flashcards from all sections into one array
-        const flashcards = [];
-
-        for (const sectionKey of Object.keys(flashcardData)) {
-            const section = flashcardData[sectionKey];
-            section.forEach(cardObj => {
-                const key = Object.keys(cardObj)[0];
-                const qa = cardObj[key];
-                flashcards.push({
-                    word: qa.q,
-                    reading: "",
-                    pos: "",
-                    definition: qa.a,
-                    example: ""
-                });
-            });
+        function toggleTheme() {
+            document.body.classList.toggle("light");
+            document.body.classList.toggle("dark");
         }
 
-        console.log("Total flashcards:", flashcards.length);
-
-        let currentIndex = 0;
-        const count = flashcards.length;
-
-        // Load saved theme from localStorage
         const savedTheme = localStorage.getItem("theme");
         if (savedTheme) {
             document.body.className = savedTheme;
@@ -253,38 +236,5 @@
             const currentTheme = document.body.classList.contains("dark") ? "dark" : "light";
             localStorage.setItem("theme", currentTheme);
         }
-
-        // Save flashcards and current index in localStorage
-        localStorage.setItem("flashcards", JSON.stringify(flashcards));
-
-        // Retrieve flashcards and current index from localStorage if present
-        const savedCards = JSON.parse(localStorage.getItem("flashcards") || "[]");
-        currentIndex = parseInt(localStorage.getItem("flashcardIndex")) || 0;
-
-        function showFlashcard(index) {
-            const card = flashcards[index];
-            document.getElementById('word').textContent = card.word || '';
-            document.getElementById('reading').textContent = card.reading || '';
-            document.getElementById('pos').textContent = card.pos || '';
-            document.getElementById('definition').textContent = card.definition || '';
-            document.getElementById('example').textContent = card.example || '';
-            document.getElementById('notification').textContent = `${index + 1} / ${count}`;
-            localStorage.setItem("flashcardIndex", index);
-        }
-
-        document.getElementById('next-btn').addEventListener('click', () => {
-            currentIndex = (currentIndex + 1) % count;
-            showFlashcard(currentIndex);
-        });
-
-        document.getElementById('previous-btn').addEventListener('click', () => {
-            currentIndex = (currentIndex - 1 + count) % count;
-            showFlashcard(currentIndex);
-        });
-
-        // Show the initial flashcard
-        showFlashcard(currentIndex);
     </script>
 </body>
-
-</html>

@@ -5,3 +5,8 @@ python-dotenv==1.1.0
 Flask
 requests
 aiohttp==3.12.4
+gunicorn==23.0.0
+uvicorn==0.34.2
+flask[async]
+gunicorn
+apscheduler==3.11.0
