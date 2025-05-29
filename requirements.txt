@@ -1,0 +1,7 @@
+PyPDF2==3.0.1
+pycryptodome
+dotenv==0.9.9
+python-dotenv==1.1.0
+Flask
+requests
+aiohttp==3.12.4
