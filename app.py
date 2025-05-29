@@ -13,6 +13,7 @@ from werkzeug.utils import secure_filename
 from PyPDF2 import PdfReader
 from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
+from asgiref.wsgi import WsgiToAsgi
 
 # =========================
 # 🌱 Environment Setup
@@ -33,6 +34,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # 🔧 Flask App Setup
 # =========================
 app = Flask(__name__)
+
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "0b8a96ee70c586cf0a38b9e325fc55adfd9854c9")  # Add secret key for sessions
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
@@ -202,5 +204,4 @@ async def flashcards_view():
 # =========================
 # 🚀 Run Server
 # =========================
-if __name__ == "__main__":
-    app.run(debug=True)
+asgi_app = WsgiToAsgi(app)
